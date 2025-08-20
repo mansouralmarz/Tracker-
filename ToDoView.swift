@@ -40,9 +40,15 @@ struct ToDoView: View {
                 
                 // Date Navigation
                 HStack(spacing: 8) {
-                    // Segmented Control: Yesterday / Today / Tomorrow
+                    // Segmented Control: Yesterday / Today / Tomorrow (relative to ACTUAL today)
+                    let cal = Calendar.current
+                    let today = Date()
+                    let isSelectedYesterday = cal.isDate(taskManager.selectedDate, inSameDayAs: cal.date(byAdding: .day, value: -1, to: today) ?? today)
+                    let isSelectedToday = cal.isDateInToday(taskManager.selectedDate)
+                    let isSelectedTomorrow = cal.isDate(taskManager.selectedDate, inSameDayAs: cal.date(byAdding: .day, value: 1, to: today) ?? today)
+                    
                     Button("Yesterday") {
-                        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: taskManager.selectedDate) ?? taskManager.selectedDate
+                        let yesterday = cal.date(byAdding: .day, value: -1, to: today) ?? taskManager.selectedDate
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                             taskManager.updateSelectedDate(yesterday)
                         }
@@ -50,7 +56,7 @@ struct ToDoView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+                    .background(isSelectedYesterday ? Color.blue : Color(red: 0.12, green: 0.12, blue: 0.14))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25), lineWidth: 1))
                     .cornerRadius(8)
                     .font(.custom("PT Sans", size: 13).weight(.semibold))
@@ -58,19 +64,20 @@ struct ToDoView: View {
                     
                     Button("Today") {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                            taskManager.updateSelectedDate(Date())
+                            taskManager.updateSelectedDate(today)
                         }
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.blue)
+                    .background(isSelectedToday ? Color.blue : Color(red: 0.12, green: 0.12, blue: 0.14))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25), lineWidth: 1))
                     .cornerRadius(8)
                     .font(.custom("PT Sans", size: 13).weight(.semibold))
                     .foregroundColor(.white)
                     
                     Button("Tomorrow") {
-                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: taskManager.selectedDate) ?? taskManager.selectedDate
+                        let tomorrow = cal.date(byAdding: .day, value: 1, to: today) ?? taskManager.selectedDate
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                             taskManager.updateSelectedDate(tomorrow)
                         }
@@ -78,7 +85,7 @@ struct ToDoView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+                    .background(isSelectedTomorrow ? Color.blue : Color(red: 0.12, green: 0.12, blue: 0.14))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25), lineWidth: 1))
                     .cornerRadius(8)
                     .font(.custom("PT Sans", size: 13).weight(.semibold))
@@ -138,7 +145,8 @@ struct ToDoView: View {
                                         subSubtaskInputTitles: $subSubtaskInputTitles,
                                         focusedEditing: $focusedEditingId,
                                         setFocusedId: { id in
-                                            // Defer focus a tick so SwiftUI attaches the new field first
+                                            // Force a value change to retrigger onChange even if same id
+                                            focusedEditingId = nil
                                             DispatchQueue.main.async {
                                                 focusedEditingId = id
                                             }
@@ -423,6 +431,7 @@ struct TaskRowView: View {
                             .strikethrough(task.isCompleted)
                             .onTapGesture(count: 2) {
                                 isEditing[task.id] = true
+                                setFocusedId(task.id)
                             }
                     }
                     
@@ -450,6 +459,7 @@ struct TaskRowView: View {
                             isEditing[task.id] = false
                         } else {
                             isEditing[task.id] = true
+                            setFocusedId(task.id)
                         }
                     }) {
                         Image(systemName: isEditing[task.id] == true ? "checkmark" : "pencil")
@@ -490,6 +500,11 @@ struct TaskRowView: View {
                             .stroke(isHovered ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
                     )
             )
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                isEditing[task.id] = true
+                setFocusedId(task.id)
+            }
             .onHover { hovering in
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isHovered = hovering
@@ -634,6 +649,7 @@ struct SubtaskRowView: View {
                             .strikethrough(subtask.isCompleted)
                             .onTapGesture(count: 2) {
                                 isEditing[subtask.id] = true
+                                setFocusedId(subtask.id)
                             }
                     }
                 }
@@ -648,6 +664,7 @@ struct SubtaskRowView: View {
                             isEditing[subtask.id] = false
                         } else {
                             isEditing[subtask.id] = true
+                            setFocusedId(subtask.id)
                         }
                     }) {
                         Image(systemName: isEditing[subtask.id] == true ? "checkmark" : "pencil")
@@ -677,6 +694,11 @@ struct SubtaskRowView: View {
                             .stroke(isHovered ? Color.green.opacity(0.3) : Color.clear, lineWidth: 1)
                     )
             )
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                isEditing[subtask.id] = true
+                setFocusedId(subtask.id)
+            }
             .onHover { hovering in
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isHovered = hovering
@@ -814,6 +836,7 @@ struct SubSubtaskRowView: View {
                         .strikethrough(subSubtask.isCompleted)
                         .onTapGesture(count: 2) {
                             isEditing[subSubtask.id] = true
+                            setFocusedId(subSubtask.id)
                         }
                 }
             }
@@ -824,11 +847,12 @@ struct SubSubtaskRowView: View {
             HStack(spacing: 8) {
                 // Edit Button
                 Button(action: {
-                                            if isEditing[subSubtask.id] == true {
-                            isEditing[subSubtask.id] = false
-                        } else {
-                            isEditing[subSubtask.id] = true
-                        }
+                    if isEditing[subSubtask.id] == true {
+                        isEditing[subSubtask.id] = false
+                    } else {
+                        isEditing[subSubtask.id] = true
+                        setFocusedId(subSubtask.id)
+                    }
                 }) {
                     Image(systemName: isEditing[subSubtask.id] == true ? "checkmark" : "pencil")
                         .foregroundColor(.blue)
@@ -857,6 +881,11 @@ struct SubSubtaskRowView: View {
                         .stroke(isHovered ? Color.orange.opacity(0.3) : Color.clear, lineWidth: 1)
                 )
         )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            isEditing[subSubtask.id] = true
+            setFocusedId(subSubtask.id)
+        }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering
@@ -870,6 +899,8 @@ struct CompactCalendarWidget: View {
     @State private var isExpanded = false
     @State private var selectedMonth = Date()
     @State private var showingDefaultTime = false
+    @State private var showQuickDueEntry = false
+    @State private var quickDueSelectedDay = Date()
     @State private var defaultHour = 9
     @State private var defaultMinute = 0
     @State private var defaultPeriod = 0 // 0 AM, 1 PM
@@ -934,6 +965,8 @@ struct CompactCalendarWidget: View {
                             hasDueTasks: !taskManager.getTasksWithDueDate(date).isEmpty,
                             onTap: {
                                 taskManager.updateSelectedDate(date)
+                                quickDueSelectedDay = date
+                                showQuickDueEntry = true
                             }
                         )
                     }
@@ -1018,6 +1051,36 @@ struct CompactCalendarWidget: View {
                     .background(Color.black)
                 }
             }
+            
+            // Upcoming top 3 due tasks when collapsed
+            if !isExpanded {
+                let upcoming = upcomingTop3
+                if !upcoming.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Upcoming")
+                            .font(.custom("PT Sans", size: 12).weight(.semibold))
+                            .foregroundColor(.gray)
+                        ForEach(upcoming, id: \.id) { task in
+                            HStack {
+                                Text(task.title)
+                                    .font(.custom("PT Sans", size: 12))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                Spacer()
+                                if let due = task.dueDate {
+                                    Text(due, style: .time)
+                                        .font(.custom("PT Sans", size: 12).weight(.medium))
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+                    .cornerRadius(8)
+                }
+            }
         }
         .onAppear {
             selectedMonth = taskManager.selectedDate
@@ -1033,6 +1096,13 @@ struct CompactCalendarWidget: View {
         }
         .onChange(of: taskManager.selectedDate) {
             selectedMonth = taskManager.selectedDate
+        }
+        .popover(isPresented: $showQuickDueEntry) {
+            QuickDueEntryView(selectedDay: quickDueSelectedDay) { pickedDate in
+                if let taskId = taskManager.addTask(title: "New task") {
+                    taskManager.setTaskDueDate(taskId, date: pickedDate)
+                }
+            }
         }
     }
     
@@ -1050,6 +1120,21 @@ struct CompactCalendarWidget: View {
             }
         }
         return days
+    }
+    
+    private var upcomingTop3: [Task] {
+        let now = Date()
+        return taskManager.getAllTasks()
+            .compactMap { task in
+                if let due = task.dueDate, due > now { return task }
+                return nil
+            }
+            .sorted { (a, b) in
+                guard let da = a.dueDate, let db = b.dueDate else { return false }
+                return da < db
+            }
+            .prefix(3)
+            .map { $0 }
     }
 }
 
@@ -1077,11 +1162,62 @@ struct CompactCalendarDayView: View {
                 
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isSelected ? .white : .white)
+                    .foregroundColor(.white)
             }
         }
         .buttonStyle(.plain)
         .frame(width: 24, height: 24)
         .contentShape(Rectangle())
+    }
+}
+
+private struct QuickDueEntryView: View {
+    let selectedDay: Date
+    let onConfirm: (Date) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var time: Date = Date()
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Add Due Time")
+                .font(.custom("PT Sans", size: 14).weight(.semibold))
+                .foregroundColor(.white)
+            DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                .datePickerStyle(.field)
+                .labelsHidden()
+                .frame(width: 180)
+                .padding(8)
+                .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+                .cornerRadius(8)
+            HStack(spacing: 10) {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.15, green: 0.15, blue: 0.18))
+                    .cornerRadius(8)
+                    .foregroundColor(.white)
+                Button("Add") {
+                    let cal = Calendar.current
+                    var comps = cal.dateComponents([.year, .month, .day], from: selectedDay)
+                    let timeComps = cal.dateComponents([.hour, .minute], from: time)
+                    comps.hour = timeComps.hour
+                    comps.minute = timeComps.minute
+                    let due = cal.date(from: comps) ?? selectedDay
+                    onConfirm(due)
+                    dismiss()
+                }
+                .buttonStyle(.plain)
+                .padding(
+                    EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+                )
+                .background(Color.blue)
+                .cornerRadius(8)
+                .foregroundColor(.white)
+            }
+        }
+        .padding(16)
+        .background(Color.black)
+        .frame(width: 260)
     }
 }
