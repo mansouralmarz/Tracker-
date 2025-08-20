@@ -41,6 +41,7 @@ struct SidebarView: View {
     @Binding var selectedSection: NavigationItem
     let taskManager: TaskManager
     @ObservedObject var notesManager: NotesManager
+    @State private var showGreeting = false
     
     private func syncSelectionToSection() {
         // Ensure selectedNoteId always points to a note in the current section
@@ -59,25 +60,18 @@ struct SidebarView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Dynamic Greeting
+            // Greeting (single line, animated)
             VStack(spacing: 12) {
-                Text(greetingMessage())
+                Text("Hello, Mansour")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    
-                Text("Mansour")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.blue.opacity(0.1))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                            )
-                    )
+                    .foregroundColor(.white)
+                    .opacity(showGreeting ? 1 : 0)
+                    .offset(y: showGreeting ? 0 : 8)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.85), value: showGreeting)
+            }
+            .onAppear {
+                // Animate greeting on launch/appearance
+                showGreeting = true
             }
             .padding(.top, 40)
             .padding(.bottom, 30)
@@ -168,15 +162,7 @@ struct SidebarView: View {
         }
     }
 
-    private func greetingMessage() -> String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Hello"
-        }
-    }
+    private func greetingMessage() -> String { "Hello, Mansour" }
 }
 
 struct NavigationItemView: View {

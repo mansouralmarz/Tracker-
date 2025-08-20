@@ -14,6 +14,7 @@
 		A1234567890123456789013C /* ToDoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890123456789013D /* ToDoView.swift */; };
 		A1234567890123456789013E /* ClipboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890123456789013F /* ClipboardView.swift */; };
 		A1234567890123456789014A /* SimpleTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234567890123456789014B /* SimpleTextEditor.swift */; };
+		A1ASSETSBUILD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1ASSETSREF /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 		A1234567890123456789013D /* ToDoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToDoView.swift; sourceTree = "<group>"; };
 		A1234567890123456789013F /* ClipboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardView.swift; sourceTree = "<group>"; };
 		A1234567890123456789014B /* SimpleTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleTextEditor.swift; sourceTree = "<group>"; };
+		A1ASSETSREF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +50,7 @@
 				A1234567890123456789013D /* ToDoView.swift */,
 				A1234567890123456789013F /* ClipboardView.swift */,
 				A1234567890123456789014B /* SimpleTextEditor.swift */,
+				A1ASSETSREF /* Assets.xcassets */,
 			);
 			path = .;
 			sourceTree = "<group>";
@@ -77,6 +80,7 @@
 			buildPhases = (
 				A1234567890123456789012N /* Sources */,
 				A1234567890123456789012H /* Frameworks */,
+				A1RESOURCESPHASE /* Resources */,
 			);
 			buildRules = (
 			);
@@ -88,6 +92,16 @@
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
+/* Begin PBXResourcesBuildPhase section */
+		A1RESOURCESPHASE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1ASSETSBUILD /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXProject section */
 		A1234567890123456789012O /* Project object */ = {
@@ -277,7 +291,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mansour.NotesApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Mansour's Notes";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -302,7 +316,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mansour.NotesApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Mansour's Notes";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

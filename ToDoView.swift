@@ -901,6 +901,10 @@ struct CompactCalendarWidget: View {
     @State private var showingDefaultTime = false
     @State private var showQuickDueEntry = false
     @State private var quickDueSelectedDay = Date()
+    @State private var quickTaskTitle: String = ""
+    @State private var showDeadlinePicker = false
+    @State private var targetTaskIdForDeadline: UUID? = nil
+    @State private var deadlinePickerDate: Date = Date()
     @State private var defaultHour = 9
     @State private var defaultMinute = 0
     @State private var defaultPeriod = 0 // 0 AM, 1 PM
@@ -909,11 +913,13 @@ struct CompactCalendarWidget: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // Calendar Header
+            // Calendar Header (day navigation)
             HStack {
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        selectedMonth = calendar.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
+                        let prevDay = calendar.date(byAdding: .day, value: -1, to: taskManager.selectedDate) ?? taskManager.selectedDate
+                        taskManager.updateSelectedDate(prevDay)
+                        selectedMonth = prevDay
                     }
                 }) {
                     Image(systemName: "chevron.left")
@@ -924,7 +930,7 @@ struct CompactCalendarWidget: View {
                 
                 Spacer()
                 
-                Text(selectedMonth, style: .date)
+                Text(taskManager.selectedDate, style: .date)
                     .font(.custom("PT Sans", size: 14).weight(.medium))
                     .foregroundColor(.white)
                 
@@ -932,7 +938,9 @@ struct CompactCalendarWidget: View {
                 
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        selectedMonth = calendar.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
+                        let nextDay = calendar.date(byAdding: .day, value: 1, to: taskManager.selectedDate) ?? taskManager.selectedDate
+                        taskManager.updateSelectedDate(nextDay)
+                        selectedMonth = nextDay
                     }
                 }) {
                     Image(systemName: "chevron.right")
@@ -1079,6 +1087,70 @@ struct CompactCalendarWidget: View {
                     .padding(.vertical, 8)
                     .background(Color(red: 0.12, green: 0.12, blue: 0.12))
                     .cornerRadius(8)
+                }
+            }
+
+            // Quick deadline bar: set a deadline label (due time) on an existing task
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.fill").foregroundColor(.blue)
+                    TextField("Set deadline for a task on this day", text: $quickTaskTitle)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.custom("PT Sans", size: 13))
+                        .foregroundColor(.white)
+                    Button("Set") {
+                        let query = quickTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        guard !query.isEmpty else { return }
+                        if let task = taskManager.getAllTasks().first(where: { $0.title.lowercased().contains(query) }) {
+                            // Initialize picker with selected day + default due time, then open picker
+                            var comps = Calendar.current.dateComponents([.year, .month, .day], from: taskManager.selectedDate)
+                            let def = taskManager.getDefaultDueTime()
+                            comps.hour = Calendar.current.component(.hour, from: def)
+                            comps.minute = Calendar.current.component(.minute, from: def)
+                            deadlinePickerDate = Calendar.current.date(from: comps) ?? Date()
+                            targetTaskIdForDeadline = task.id
+                            showDeadlinePicker = true
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue)
+                    .cornerRadius(8)
+                    .foregroundColor(.white)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+                .cornerRadius(8)
+                .popover(isPresented: $showDeadlinePicker) {
+                    VStack(spacing: 12) {
+                        Text("Choose Date & Time")
+                            .font(.custom("PT Sans", size: 14).weight(.semibold))
+                            .foregroundColor(.white)
+                        DatePicker("Due", selection: $deadlinePickerDate, displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.field)
+                            .labelsHidden()
+                            .padding(8)
+                            .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+                            .cornerRadius(8)
+                        Button("Save") {
+                            if let taskId = targetTaskIdForDeadline {
+                                taskManager.setTaskDueDate(taskId, date: deadlinePickerDate)
+                            }
+                            showDeadlinePicker = false
+                            quickTaskTitle = ""
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue)
+                        .cornerRadius(8)
+                        .foregroundColor(.white)
+                    }
+                    .padding(16)
+                    .frame(width: 320)
+                    .background(Color.black)
                 }
             }
         }

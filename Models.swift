@@ -2,6 +2,14 @@ import Foundation
 import SwiftUI
 
 // MARK: - Note Models
+struct Attachment: Identifiable, Codable {
+    var id = UUID()
+    var type: String // "image" | "pdf" | "file"
+    var filename: String // stored filename on disk
+    var originalFilename: String?
+    var createdAt: Date = Date()
+}
+
 struct Note: Identifiable, Codable {
     var id = UUID()
     var title: String
@@ -10,6 +18,7 @@ struct Note: Identifiable, Codable {
     var updatedAt: Date
     var isClipboardNote: Bool = false // New property to distinguish clipboard notes
     var lastEditTime: Date // Track when the note was last edited for clipboard timer
+    var attachments: [Attachment]? = []
     
     var formattedDate: String {
         let formatter = DateFormatter()
@@ -50,6 +59,7 @@ class NotesManager: ObservableObject {
     private let userDefaults = UserDefaults.standard
     private let notesKey = "SavedNotes"
     private var cleanupTimer: Timer?
+    private let attachmentsFolderName = "Attachments"
     
     var selectedNote: Note? {
         notes.first { $0.id == selectedNoteId }
@@ -120,6 +130,14 @@ class NotesManager: ObservableObject {
     }
     
     func deleteNote(_ note: Note) {
+        // Remove files on disk for this note's attachments
+        if let atts = note.attachments, !atts.isEmpty {
+            for att in atts {
+                if let url = attachmentURL(for: att) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
         notes.removeAll { $0.id == note.id }
         if selectedNoteId == note.id {
             selectedNoteId = notes.first?.id
@@ -150,6 +168,45 @@ class NotesManager: ObservableObject {
     
     func getRegularNotes() -> [Note] {
         return notes.filter { !$0.isClipboardNote }
+    }
+
+    // MARK: - Attachments
+    private func attachmentsDirectory() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("MansoursNotes", isDirectory: true).appendingPathComponent(attachmentsFolderName, isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    private func attachmentURL(for att: Attachment) -> URL? {
+        let dir = attachmentsDirectory()
+        return dir.appendingPathComponent(att.filename, isDirectory: false)
+    }
+
+    func addAttachment(to noteId: UUID, data: Data, fileExtension: String, originalFilename: String?) -> Attachment? {
+        guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return nil }
+        let attId = UUID()
+        let sanitizedExt = fileExtension.replacingOccurrences(of: ".", with: "")
+        let filename = "\(attId).\(sanitizedExt)"
+        let url = attachmentsDirectory().appendingPathComponent(filename)
+        do {
+            try data.write(to: url, options: .atomic)
+            var type = "file"
+            if ["png","jpg","jpeg","gif","heic","tiff"].contains(sanitizedExt.lowercased()) { type = "image" }
+            if ["pdf"].contains(sanitizedExt.lowercased()) { type = "pdf" }
+            let att = Attachment(type: type, filename: filename, originalFilename: originalFilename, createdAt: Date())
+            if notes[index].attachments == nil { notes[index].attachments = [] }
+            notes[index].attachments?.append(att)
+            notes[index].updatedAt = Date()
+            notes[index].lastEditTime = Date()
+            objectWillChange.send()
+            saveNotes()
+            return att
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -285,6 +342,26 @@ class TaskManager: ObservableObject {
             dailyTaskLists = dailyTaskLists
         }
         
+        saveTasks()
+        return taskId
+    }
+
+    // Create a task on a specific calendar day regardless of current selection
+    func addTask(on date: Date, title: String) -> UUID? {
+        let newTask = Task(title: title)
+        let taskId = newTask.id
+        let cal = Calendar.current
+        let targetDay = cal.startOfDay(for: date)
+        if let listIndex = dailyTaskLists.firstIndex(where: { cal.isDate($0.date, inSameDayAs: targetDay) }) {
+            objectWillChange.send()
+            dailyTaskLists[listIndex].tasks.append(newTask)
+            dailyTaskLists = dailyTaskLists
+        } else {
+            let newList = DailyTaskList(date: targetDay, tasks: [newTask])
+            objectWillChange.send()
+            dailyTaskLists.append(newList)
+            dailyTaskLists = dailyTaskLists
+        }
         saveTasks()
         return taskId
     }

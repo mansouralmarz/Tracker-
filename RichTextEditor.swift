@@ -4,6 +4,7 @@ import AppKit
 struct RichTextEditor: NSViewRepresentable {
     @Binding var text: NSAttributedString
     let placeholder: String
+    var onChange: ((NSAttributedString) -> Void)? = nil
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -55,7 +56,9 @@ struct RichTextEditor: NSViewRepresentable {
         
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.attributedString()
+            let value = textView.attributedString()
+            parent.text = value
+            parent.onChange?(value)
         }
         
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
