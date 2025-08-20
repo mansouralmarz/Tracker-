@@ -7,11 +7,10 @@ struct ToDoView: View {
     @State private var newSubtaskTitles: [UUID: String] = [:]
     @State private var newSubSubtaskTitles: [UUID: String] = [:]
     @State private var isEditing: [UUID: Bool] = [:]
-    @State private var focusedInputId: UUID = UUID()
     @FocusState private var focusedTaskId: UUID?
     @FocusState private var focusedSubtaskId: UUID?
     @FocusState private var focusedSubSubtaskId: UUID?
-    private let defaultUUID = UUID()
+    @FocusState private var isNewTaskFieldFocused: Bool
     @State private var hasProcessedTab: [UUID: Bool] = [:]
     @State private var isMergedView = false
     @State private var subtaskInputFields: Set<UUID> = []
@@ -24,7 +23,6 @@ struct ToDoView: View {
     @State private var selectedDateForDueDate = Date()
     @State private var showingSuggestions = false
     @State private var selectedTime = Date()
-    @FocusState private var isNewTaskFieldFocused: Bool
     @State private var keyMonitor: Any?
     
     var body: some View {
@@ -134,13 +132,13 @@ struct ToDoView: View {
                                         taskIndex: taskIndex,
                                         taskManager: taskManager,
                                         isEditing: $isEditing,
-                                        focusedInputId: $focusedInputId,
                                         hasProcessedTab: $hasProcessedTab,
                                         isMergedView: $isMergedView,
                                         subtaskInputFields: $subtaskInputFields,
                                         subtaskInputTitles: $subtaskInputTitles,
                                         subSubtaskInputFields: $subSubtaskInputFields,
-                                        subSubtaskInputTitles: $subSubtaskInputTitles
+                                        subSubtaskInputTitles: $subSubtaskInputTitles,
+                                        focusedTaskId: $focusedTaskId
                                     )
                                     .id(task.id)
                                 }
@@ -173,7 +171,6 @@ struct ToDoView: View {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                         if let newId = taskManager.addTask(title: title) {
                                             isEditing[newId] = true
-                                            focusedInputId = newId
                                             focusedTaskId = newId
                                             proxy.scrollTo(newId, anchor: .bottom)
                                         }
@@ -190,7 +187,7 @@ struct ToDoView: View {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 if let newId = taskManager.addTask(title: title) {
                                     isEditing[newId] = true
-                                    focusedInputId = newId
+                                    focusedTaskId = newId
                                     proxy.scrollTo(newId, anchor: .bottom)
                                 }
                                 newTaskTitle = ""
@@ -249,7 +246,7 @@ struct ToDoView: View {
                 // Task → Subtask
                 isEditing[activeId] = false
                 isEditing[newId] = true
-                focusedInputId = newId
+                focusedSubtaskId = newId
                 return
             }
             // Try as Subtask
@@ -257,7 +254,7 @@ struct ToDoView: View {
                 // Subtask → SubSubtask
                 isEditing[activeId] = false
                 isEditing[newId] = true
-                focusedInputId = newId
+                focusedSubSubtaskId = newId
                 return
             }
         }
@@ -268,7 +265,7 @@ struct ToDoView: View {
                 let taskId = currentList.tasks[idx].id
                 if let newId = taskManager.indentTaskToSubtask(taskId) {
                     isEditing[newId] = true
-                    focusedInputId = newId
+                    focusedSubtaskId = newId
                     return
                 }
             }
@@ -278,7 +275,7 @@ struct ToDoView: View {
                     let subtaskId = task.subtasks[subIdx].id
                     if let newId = taskManager.indentSubtaskToSubSubtask(subtaskId) {
                         isEditing[newId] = true
-                        focusedInputId = newId
+                        focusedSubSubtaskId = newId
                         return
                     }
                 }
@@ -293,14 +290,14 @@ struct ToDoView: View {
             if let newId = taskManager.outdentSubSubtaskToSubtask(activeId) {
                 isEditing[activeId] = false
                 isEditing[newId] = true
-                focusedInputId = newId
+                focusedSubtaskId = newId
                 return
             }
             // Try subtask → task
             if let newId = taskManager.outdentSubtaskToTask(activeId) {
                 isEditing[activeId] = false
                 isEditing[newId] = true
-                focusedInputId = newId
+                focusedTaskId = newId
                 return
             }
             // Task → Task (no-op)
@@ -314,7 +311,7 @@ struct ToDoView: View {
                         let id = subtask.subSubtasks[idx].id
                         if let newId = taskManager.outdentSubSubtaskToSubtask(id) {
                             isEditing[newId] = true
-                            focusedInputId = newId
+                            focusedSubtaskId = newId
                             return
                         }
                     }
@@ -323,7 +320,7 @@ struct ToDoView: View {
                     let id = task.subtasks[subIdx].id
                     if let newId = taskManager.outdentSubtaskToTask(id) {
                         isEditing[newId] = true
-                        focusedInputId = newId
+                        focusedTaskId = newId
                         return
                     }
                 }
@@ -337,13 +334,13 @@ struct TaskRowView: View {
     let taskIndex: Int
     @ObservedObject var taskManager: TaskManager
     @Binding var isEditing: [UUID: Bool]
-    @Binding var focusedInputId: UUID
     @Binding var hasProcessedTab: [UUID: Bool]
     @Binding var isMergedView: Bool
     @Binding var subtaskInputFields: Set<UUID>
     @Binding var subtaskInputTitles: [UUID: String]
     @Binding var subSubtaskInputFields: Set<UUID>
     @Binding var subSubtaskInputTitles: [UUID: String]
+    @Binding var focusedTaskId: UUID?
     
     @State private var isHovered = false
     
@@ -378,7 +375,6 @@ struct TaskRowView: View {
                             if let newId = taskManager.insertTask(after: task.id, title: "") {
                                 isEditing[task.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
                                 focusedTaskId = newId
                             }
                         }
@@ -387,7 +383,6 @@ struct TaskRowView: View {
                             if let newId = taskManager.outdentSubtaskToTask(task.id) {
                                 isEditing[task.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
                                 focusedTaskId = newId
                             }
                         }
@@ -483,11 +478,11 @@ struct TaskRowView: View {
                             taskId: task.id,
                             taskManager: taskManager,
                             isEditing: $isEditing,
-                            focusedInputId: $focusedInputId,
                             hasProcessedTab: $hasProcessedTab,
                             isMergedView: $isMergedView,
                             subSubtaskInputFields: $subSubtaskInputFields,
-                            subSubtaskInputTitles: $subSubtaskInputTitles
+                            subSubtaskInputTitles: $subSubtaskInputTitles,
+                            focusedSubtaskId: $focusedSubtaskId
                         )
                     }
                     
@@ -516,7 +511,7 @@ struct TaskRowView: View {
                                     if let last = task.subtasks.last {
                                         if let newTaskId = taskManager.outdentSubtaskToTask(last.id) {
                                             isEditing[newTaskId] = true
-                                            focusedInputId = newTaskId
+                                            focusedTaskId = newTaskId
                                         }
                                     }
                                 }
@@ -542,11 +537,11 @@ struct SubtaskRowView: View {
     let taskId: UUID
     @ObservedObject var taskManager: TaskManager
     @Binding var isEditing: [UUID: Bool]
-    @Binding var focusedInputId: UUID
     @Binding var hasProcessedTab: [UUID: Bool]
     @Binding var isMergedView: Bool
     @Binding var subSubtaskInputFields: Set<UUID>
     @Binding var subSubtaskInputTitles: [UUID: String]
+    @Binding var focusedSubtaskId: UUID?
     
     @State private var isHovered = false
     
@@ -581,7 +576,6 @@ struct SubtaskRowView: View {
                             if let newId = taskManager.insertSubtask(after: subtask.id, title: "") {
                                 isEditing[subtask.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
                                 focusedSubtaskId = newId
                             }
                         }
@@ -589,7 +583,7 @@ struct SubtaskRowView: View {
                             if let newId = taskManager.outdentSubtaskToTask(subtask.id) {
                                 isEditing[subtask.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
+                                focusedTaskId = newId
                             }
                         }
                         
@@ -661,7 +655,7 @@ struct SubtaskRowView: View {
                             taskId: taskId,
                             taskManager: taskManager,
                             isEditing: $isEditing,
-                            focusedInputId: $focusedInputId
+                            focusedSubSubtaskId: $focusedSubSubtaskId
                         )
                     }
                     
@@ -690,7 +684,7 @@ struct SubtaskRowView: View {
                                     if let last = subtask.subSubtasks.last {
                                         if let newSubtaskId = taskManager.outdentSubSubtaskToSubtask(last.id) {
                                             isEditing[newSubtaskId] = true
-                                            focusedInputId = newSubtaskId
+                                            focusedSubtaskId = newSubtaskId
                                         }
                                     }
                                 }
@@ -717,7 +711,7 @@ struct SubSubtaskRowView: View {
     let taskId: UUID
     @ObservedObject var taskManager: TaskManager
     @Binding var isEditing: [UUID: Bool]
-    @Binding var focusedInputId: UUID
+    @Binding var focusedSubSubtaskId: UUID?
     
     @State private var isHovered = false
     
@@ -752,7 +746,6 @@ struct SubSubtaskRowView: View {
                             if let newId = taskManager.outdentSubSubtaskToSubtask(subSubtask.id) {
                                 isEditing[subSubtask.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
                                 focusedSubtaskId = newId
                             }
                         } else {
@@ -760,7 +753,6 @@ struct SubSubtaskRowView: View {
                             if let newId = taskManager.insertSubSubtask(after: subSubtask.id, title: "") {
                                 isEditing[subSubtask.id] = false
                                 isEditing[newId] = true
-                                focusedInputId = newId
                                 focusedSubSubtaskId = newId
                             }
                         }
@@ -769,7 +761,7 @@ struct SubSubtaskRowView: View {
                         if let newId = taskManager.outdentSubSubtaskToSubtask(subSubtask.id) {
                             isEditing[subSubtask.id] = false
                             isEditing[newId] = true
-                            focusedInputId = newId
+                            focusedSubtaskId = newId
                         }
                     }
                     
