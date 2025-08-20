@@ -42,14 +42,29 @@ struct SidebarView: View {
     let taskManager: TaskManager
     @ObservedObject var notesManager: NotesManager
     
+    private func syncSelectionToSection() {
+        // Ensure selectedNoteId always points to a note in the current section
+        if let id = notesManager.selectedNoteId,
+           let note = notesManager.notes.first(where: { $0.id == id }) {
+            if selectedSection == .notes && note.isClipboardNote {
+                notesManager.selectedNoteId = notesManager.getRegularNotes().first?.id
+            } else if selectedSection == .clipboard && !note.isClipboardNote {
+                notesManager.selectedNoteId = notesManager.getClipboardNotes().first?.id
+            }
+        } else {
+            // Nothing selected; choose first in section if exists
+            notesManager.selectedNoteId = (selectedSection == .notes ? notesManager.getRegularNotes().first?.id : notesManager.getClipboardNotes().first?.id)
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // Dynamic Greeting
             VStack(spacing: 12) {
                 Text(greetingMessage())
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-
+                        .foregroundColor(.white)
+                    
                 Text("Mansour")
                     .font(.system(size: 18, weight: .medium, design: .rounded))
                     .foregroundColor(.blue)
@@ -88,41 +103,46 @@ struct SidebarView: View {
             if selectedSection == .notes || selectedSection == .clipboard {
                 VStack(spacing: 0) {
                     // Notes List Header
-                    HStack {
+                HStack {
                         Text(selectedSection == .notes ? "Your Notes" : "Clipboard Notes")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                        
-                        Spacer()
-                        
-                        Button(action: {
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button(action: {
                             if selectedSection == .notes {
-                                notesManager.addNote(title: "New Note", content: "")
+                                let newId = notesManager.addNote(title: "New Note", content: "")
+                                notesManager.selectedNoteId = newId
                             } else {
-                                notesManager.addClipboardNote(title: "New Clipboard Note", content: "")
+                                let newId = notesManager.addClipboardNote(title: "New Clipboard Note", content: "")
+                                notesManager.selectedNoteId = newId
                             }
-                        }) {
-                            Image(systemName: "plus")
+                    }) {
+                        Image(systemName: "plus")
                                 .foregroundColor(.blue)
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 20)
+                }
+                .padding(.horizontal, 20)
                     .padding(.top, 20)
                     .padding(.bottom, 10)
-                    
-                    // Notes List
-                    ScrollView {
+                
+                // Notes List
+                ScrollView {
                         LazyVStack(spacing: 6) {
                             ForEach(selectedSection == .notes ? notesManager.getRegularNotes() : notesManager.getClipboardNotes()) { note in
                                 SidebarNoteRowView(
-                                    note: note,
+                                note: note,
                                     isSelected: notesManager.selectedNoteId == note.id,
                                     onTap: {
                                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                             notesManager.selectedNoteId = note.id
                                         }
+                                    },
+                                    onDelete: {
+                                        notesManager.deleteNote(note)
                                     }
                                 )
                             }
@@ -133,14 +153,12 @@ struct SidebarView: View {
                 }
                 .onAppear {
                     notesManager.loadNotes()
-                    if selectedSection == .clipboard {
-                        notesManager.cleanupExpiredClipboardNotes()
-                    }
+                    syncSelectionToSection()
+                    if selectedSection == .clipboard { notesManager.cleanupExpiredClipboardNotes() }
                 }
                 .onChange(of: selectedSection) { _ in
-                    if selectedSection == .clipboard {
-                        notesManager.cleanupExpiredClipboardNotes()
-                    }
+                    if selectedSection == .clipboard { notesManager.cleanupExpiredClipboardNotes() }
+                    syncSelectionToSection()
                 }
             } else {
                 Spacer()
@@ -281,8 +299,8 @@ struct TimePickerView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
+        .padding(.vertical, 12)
+        .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color(red: 0.15, green: 0.15, blue: 0.18))
                     .overlay(
@@ -351,7 +369,7 @@ struct MainContentView: View {
             ToDoView(taskManager: taskManager)
         case .clipboard:
             // Show note editor for clipboard section
-            NoteEditorView(notesManager: notesManager)
+            NoteEditorView(notesManager: notesManager, section: .clipboard)
         }
     }
 }
@@ -361,7 +379,7 @@ struct NotesView: View {
     
     var body: some View {
         // Show note editor for notes section
-        NoteEditorView(notesManager: notesManager)
+        NoteEditorView(notesManager: notesManager, section: .notes)
     }
 }
 
@@ -376,10 +394,10 @@ struct NoteRowView: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(note.displayTitle)
+                Text(note.displayTitle)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
                     
                     Spacer()
                     
@@ -423,6 +441,7 @@ struct SidebarNoteRowView: View {
     let note: Note
     let isSelected: Bool
     let onTap: () -> Void
+    let onDelete: () -> Void
     
     @State private var isHovered = false
     @State private var now = Date()
@@ -506,6 +525,13 @@ struct SidebarNoteRowView: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete Note", systemImage: "trash")
+            }
+        }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering
@@ -519,10 +545,12 @@ struct SidebarNoteRowView: View {
 
 struct NoteEditorView: View {
     @ObservedObject var notesManager: NotesManager
+    var section: NavigationItem
     
     var body: some View {
-        if let selectedNote = notesManager.selectedNote {
+        if let selectedNote = notesManager.selectedNote, matchesSection(selectedNote) {
             SimpleTextEditor(note: selectedNote, notesManager: notesManager)
+                .id(selectedNote.id) // Force a fresh editor for each note so bodies don't carry over
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 20) {
@@ -530,12 +558,20 @@ struct NoteEditorView: View {
                     .font(.system(size: 72))
                     .foregroundColor(.gray.opacity(0.6))
                 
-                Text("Select a note to start writing")
+                Text("No note selected in this section")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(.gray.opacity(0.8))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(red: 0.04, green: 0.04, blue: 0.06))
+        }
+    }
+    
+    private func matchesSection(_ note: Note) -> Bool {
+        switch section {
+        case .notes: return !note.isClipboardNote
+        case .clipboard: return note.isClipboardNote
+        case .toDoList: return false
         }
     }
 }

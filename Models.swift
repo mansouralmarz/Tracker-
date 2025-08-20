@@ -91,7 +91,8 @@ class NotesManager: ObservableObject {
     }
     
     func addNote(title: String, content: String) -> UUID {
-        let newNote = Note(title: title, content: content)
+        let newNote = Note(title: title, content: "")
+        objectWillChange.send()
         notes.append(newNote)
         selectedNoteId = newNote.id
         saveNotes()
@@ -100,6 +101,7 @@ class NotesManager: ObservableObject {
     
     func updateNoteContent(_ note: Note, content: String) {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            objectWillChange.send()
             notes[index].content = content
             notes[index].updatedAt = Date()
             notes[index].lastEditTime = Date() // Update last edit time
@@ -109,6 +111,7 @@ class NotesManager: ObservableObject {
     
     func updateNoteTitle(_ note: Note, title: String) {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            objectWillChange.send()
             notes[index].title = title
             notes[index].updatedAt = Date()
             notes[index].lastEditTime = Date() // Update last edit time
@@ -125,8 +128,10 @@ class NotesManager: ObservableObject {
     }
     
     func addClipboardNote(title: String, content: String) -> UUID {
-        let newNote = Note(title: title, content: content, isClipboardNote: true)
+        let newNote = Note(title: title, content: "", isClipboardNote: true)
+        objectWillChange.send()
         notes.append(newNote)
+        selectedNoteId = newNote.id
         saveNotes()
         return newNote.id
     }

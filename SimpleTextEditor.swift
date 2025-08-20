@@ -24,6 +24,13 @@ struct SimpleTextEditor: View {
                 .font(.system(size: 28, weight: .bold, design: .default))
                 .foregroundColor(.white)
                 .textFieldStyle(PlainTextFieldStyle())
+                .contextMenu {
+                    Button(role: .destructive) {
+                        notesManager.deleteNote(note)
+                    } label: {
+                        Label("Delete Note", systemImage: "trash")
+                    }
+                }
                 
                 Spacer()
                 
@@ -56,13 +63,26 @@ struct SimpleTextEditor: View {
                     .background(Color.clear)
                     .scrollContentBackground(.hidden)
                     .padding(.horizontal, 30)
+                    .id(note.id) // Reset editor state when switching notes
+                    .textSelection(.enabled)
                     .onChange(of: text) { newValue in
                         if !isProgrammaticChange {
                             handleTextChange(newValue)
                         }
                     }
                     .onAppear {
-                        text = note.content
+                        // Prevent cross-note copying by silencing change propagation
+                        isProgrammaticChange = true
+                        if note.title == "New Note" && note.content.isEmpty {
+                            text = ""
+                        } else {
+                            text = note.content
+                        }
+                        DispatchQueue.main.async { isProgrammaticChange = false }
+                    }
+                    .onDisappear {
+                        // Flush latest text on exit
+                        notesManager.updateNoteContent(note, content: text)
                     }
                     .onSubmit {
                         // Handle Enter key for new lines
@@ -95,7 +115,7 @@ struct SimpleTextEditor: View {
                     }
                     
                     // Links Grid
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12)], spacing: 12) {
                         ForEach(detectedLinks, id: \.self) { url in
                             LinkPreviewCard(url: url)
                         }
@@ -120,8 +140,16 @@ struct SimpleTextEditor: View {
             }
         }
         .background(Color.black)
-        .onAppear {
+        .onAppear { detectLinks() }
+        .onChange(of: note.id) { _ in
+            // When switching notes, reset editor state without writing back
+            isProgrammaticChange = true
+            text = note.content
             detectLinks()
+            DispatchQueue.main.async { isProgrammaticChange = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
+            notesManager.updateNoteContent(note, content: text)
         }
     }
     
@@ -161,32 +189,30 @@ struct LinkPreviewCard: View {
             NSWorkspace.shared.open(url)
         }) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(spacing: 8) {
                     Image(systemName: "link")
                         .foregroundColor(.blue)
                         .font(.system(size: 14, weight: .medium))
-                    
                     Text(url.host ?? "Unknown")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    
                     Spacer()
                 }
                 
                 Text(url.absoluteString)
-                    .font(.system(size: 10))
-                    .foregroundColor(.gray)
+                    .font(.system(size: 11))
+                    .foregroundColor(.blue)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(red: 0.12, green: 0.12, blue: 0.12))
+                    .fill(Color(red: 0.10, green: 0.10, blue: 0.10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(isHovered ? Color.blue.opacity(0.3) : Color.gray.opacity(0.2), lineWidth: 1)
+                            .stroke(isHovered ? Color.blue.opacity(0.4) : Color.gray.opacity(0.2), lineWidth: 1)
                     )
             )
         }
