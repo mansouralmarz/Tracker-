@@ -425,6 +425,25 @@ struct SidebarNoteRowView: View {
     let onTap: () -> Void
     
     @State private var isHovered = false
+    @State private var now = Date()
+    private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    
+    private var timeRemainingText: String {
+        guard note.isClipboardNote else { return "" }
+        let expiry = note.lastEditTime.addingTimeInterval(24 * 60 * 60)
+        let remaining = max(0, Int(expiry.timeIntervalSince(now)))
+        let hours = remaining / 3600
+        let minutes = (remaining % 3600) / 60
+        let seconds = remaining % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+    
+    private var expiryProgress: CGFloat {
+        guard note.isClipboardNote else { return 0 }
+        let elapsed = max(0, now.timeIntervalSince(note.lastEditTime))
+        let progress = min(1.0, elapsed / (24 * 60 * 60))
+        return CGFloat(progress)
+    }
     
     var body: some View {
         Button(action: onTap) {
@@ -441,9 +460,36 @@ struct SidebarNoteRowView: View {
                         .lineLimit(1)
                 }
                 
-                Text(note.formattedDate)
-                    .font(.custom("PT Sans", size: 11))
-                    .foregroundColor(.gray.opacity(0.5))
+                HStack(spacing: 8) {
+                    Text(note.formattedDate)
+                        .font(.custom("PT Sans", size: 11))
+                        .foregroundColor(.gray.opacity(0.5))
+                    
+                    if note.isClipboardNote {
+                        HStack(spacing: 4) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 10))
+                                .foregroundColor(.orange)
+                            Text(timeRemainingText)
+                                .font(.custom("PT Sans", size: 11).weight(.semibold))
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+                
+                if note.isClipboardNote {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.white.opacity(0.06))
+                                .frame(height: 4)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.orange)
+                                .frame(width: max(0, expiryProgress) * geo.size.width, height: 4)
+                        }
+                    }
+                    .frame(height: 4)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -464,6 +510,9 @@ struct SidebarNoteRowView: View {
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering
             }
+        }
+        .onReceive(countdownTimer) { newNow in
+            now = newNow
         }
     }
 }
