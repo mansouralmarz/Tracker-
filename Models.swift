@@ -19,6 +19,7 @@ struct Note: Identifiable, Codable {
     var isClipboardNote: Bool = false // New property to distinguish clipboard notes
     var lastEditTime: Date // Track when the note was last edited for clipboard timer
     var attachments: [Attachment]? = []
+    var chat: [ChatMessage]? = []
     
     var formattedDate: String {
         let formatter = DateFormatter()
@@ -52,14 +53,25 @@ struct Note: Identifiable, Codable {
     }
 }
 
+// MARK: - Chat
+struct ChatMessage: Identifiable, Codable {
+    enum Role: String, Codable { case user, assistant }
+    var id = UUID()
+    var role: Role
+    var content: String
+    var createdAt: Date = Date()
+}
+
 class NotesManager: ObservableObject {
     @Published var notes: [Note] = []
     @Published var selectedNoteId: UUID?
+    @Published var useAdvancedEditor: Bool = UserDefaults.standard.bool(forKey: "UseAdvancedEditor")
     
     private let userDefaults = UserDefaults.standard
     private let notesKey = "SavedNotes"
     private var cleanupTimer: Timer?
     private let attachmentsFolderName = "Attachments"
+    private let apiKeyKey = "OpenAI_API_Key"
     
     var selectedNote: Note? {
         notes.first { $0.id == selectedNoteId }
@@ -97,6 +109,108 @@ class NotesManager: ObservableObject {
     func saveNotes() {
         if let encoded = try? JSONEncoder().encode(notes) {
             UserDefaults.standard.set(encoded, forKey: notesKey)
+        }
+    }
+
+    func setUseAdvancedEditor(_ value: Bool) {
+        useAdvancedEditor = value
+        UserDefaults.standard.set(value, forKey: "UseAdvancedEditor")
+        objectWillChange.send()
+    }
+
+    // MARK: - Chat storage
+    func appendChatMessage(noteId: UUID, role: ChatMessage.Role, content: String) {
+        guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return }
+        let msg = ChatMessage(role: role, content: content)
+        if notes[index].chat == nil { notes[index].chat = [] }
+        notes[index].chat?.append(msg)
+        notes[index].updatedAt = Date()
+        objectWillChange.send()
+        saveNotes()
+    }
+    
+    func clearChat(noteId: UUID) {
+        guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return }
+        notes[index].chat = []
+        objectWillChange.send()
+        saveNotes()
+    }
+    
+    // MARK: - Optional OpenAI API
+    func setOpenAIKey(_ key: String) {
+        UserDefaults.standard.set(key, forKey: apiKeyKey)
+    }
+    
+    func getOpenAIKey() -> String? { UserDefaults.standard.string(forKey: apiKeyKey) }
+    
+    func generateAIReply(noteId: UUID, prompt: String, noteContext: String) async -> String {
+        if let apiKey = getOpenAIKey(), !apiKey.isEmpty {
+            // Minimal call; fails gracefully
+            let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            let system = "You are a helpful writing assistant inside a notes app. Be concise."
+            let user = "Context:\n\(noteContext)\n\nUser:\n\(prompt)"
+            let body: [String: Any] = [
+                "model": "gpt-4o-mini",
+                "messages": [
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": user]
+                ],
+                "temperature": 0.4
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let choices = json["choices"] as? [[String: Any]],
+                       let msg = choices.first?["message"] as? [String: Any],
+                       let content = msg["content"] as? String {
+                        return content
+                    }
+                }
+            } catch { }
+        }
+        // Local fallback
+        return "(offline) I received: \(prompt)."
+    }
+
+    // Completion-based variant to avoid Swift concurrency Task name conflicts
+    func generateAIReply(noteId: UUID, prompt: String, noteContext: String, completion: @escaping (String) -> Void) {
+        if let apiKey = getOpenAIKey(), !apiKey.isEmpty {
+            let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            let system = "You are a helpful writing assistant inside a notes app. Be concise."
+            let user = "Context:\n\(noteContext)\n\nUser:\n\(prompt)"
+            let body: [String: Any] = [
+                "model": "gpt-4o-mini",
+                "messages": [
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": user]
+                ],
+                "temperature": 0.4
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                var reply = "(offline) I received: \(prompt)."
+                if let data = data, let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let choices = json["choices"] as? [[String: Any]],
+                       let msg = choices.first?["message"] as? [String: Any],
+                       let content = msg["content"] as? String {
+                        reply = content
+                    }
+                }
+                DispatchQueue.main.async { completion(reply) }
+            }.resume()
+        } else {
+            DispatchQueue.main.async { completion("(offline) I received: \(prompt).") }
         }
     }
     
@@ -206,6 +320,67 @@ class NotesManager: ObservableObject {
             return att
         } catch {
             return nil
+        }
+    }
+}
+
+// MARK: - Analytics Manager (tracks app active time per day)
+class AnalyticsManager: ObservableObject {
+    @Published var dailySeconds: [String: TimeInterval] = [:] // key: yyyy-MM-dd
+    private var currentStart: Date?
+    private let storageKey = "DailyActiveSeconds"
+    private let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.locale = .current
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
+            dailySeconds = decoded
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(didBecomeActive), name: NSApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(willResignActive), name: NSApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(willTerminate), name: NSApplication.willTerminateNotification, object: nil)
+    }
+
+    @objc private func didBecomeActive() { startSession() }
+    @objc private func willResignActive() { endSession() }
+    @objc private func willTerminate() { endSession() }
+
+    func startSession() { if currentStart == nil { currentStart = Date() } }
+
+    func endSession() {
+        guard let start = currentStart else { return }
+        let seconds = max(0, Date().timeIntervalSince(start))
+        currentStart = nil
+        let key = dateKey(Date())
+        dailySeconds[key, default: 0] += seconds
+        save()
+        objectWillChange.send()
+    }
+
+    func hoursLast7Days() -> [(date: Date, hours: Double)] {
+        var results: [(Date, Double)] = []
+        let cal = Calendar.current
+        for offset in stride(from: 6, through: 0, by: -1) {
+            if let day = cal.date(byAdding: .day, value: -offset, to: Date()) {
+                let key = dateKey(day)
+                let h = (dailySeconds[key] ?? 0) / 3600.0
+                results.append((day, h))
+            }
+        }
+        return results
+    }
+
+    private func dateKey(_ date: Date) -> String { formatter.string(from: date) }
+    private func save() {
+        if let data = try? JSONEncoder().encode(dailySeconds) {
+            UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
 }
@@ -477,17 +652,18 @@ class TaskManager: ObservableObject {
         for (listIndex, list) in dailyTaskLists.enumerated() {
             for (taskIndex, task) in list.tasks.enumerated() {
                 if let subtaskIndex = task.subtasks.firstIndex(where: { $0.id == subtaskId }) {
+                    // Toggle the subtask state
                     dailyTaskLists[listIndex].tasks[taskIndex].subtasks[subtaskIndex].isCompleted.toggle()
                     dailyTaskLists[listIndex].tasks[taskIndex].subtasks[subtaskIndex].updatedAt = Date()
                     dailyTaskLists[listIndex].tasks[taskIndex].updatedAt = Date()
-                    
-                    // Cascading completion for sub-subtasks
+
+                    // Cascade only when checking; do not auto-recheck on uncheck
                     if dailyTaskLists[listIndex].tasks[taskIndex].subtasks[subtaskIndex].isCompleted {
                         markAllSubSubtasksComplete(subtaskId: subtaskId, listIndex: listIndex, taskIndex: taskIndex, subtaskIndex: subtaskIndex)
                     }
-                    
-                    // Check if all sub-subtasks are complete to auto-complete parent
-                    checkSubtaskCompletion(subtaskId: subtaskId, listIndex: listIndex, taskIndex: taskIndex, subtaskIndex: subtaskIndex)
+
+                    // Recompute parent completion from children without overriding explicit subtask toggle
+                    checkParentCompletion(taskId: dailyTaskLists[listIndex].tasks[taskIndex].id, listIndex: listIndex, taskIndex: taskIndex)
                     break
                 }
             }

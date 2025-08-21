@@ -42,6 +42,7 @@ struct SidebarView: View {
     let taskManager: TaskManager
     @ObservedObject var notesManager: NotesManager
     @State private var showGreeting = false
+    @State private var showAIChat = false
     
     private func syncSelectionToSection() {
         // Ensure selectedNoteId always points to a note in the current section
@@ -76,6 +77,46 @@ struct SidebarView: View {
             .padding(.top, 40)
             .padding(.bottom, 30)
             
+            // Utilities row (AI Chat popover)
+            HStack(spacing: 8) {
+                Button(action: { showAIChat.toggle() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "message")
+                            .foregroundColor(.blue)
+                        Text("AI Chat")
+                            .foregroundColor(.white)
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showAIChat) {
+                    VStack(spacing: 0) {
+                        if let n = notesManager.selectedNote {
+                            AIChatBox(note: n, notesManager: notesManager)
+                                .frame(width: 420, height: 520)
+                                .background(Color.black)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else {
+                            VStack {
+                                Text("Select a note to chat")
+                                    .foregroundColor(.white)
+                                    .padding()
+                                Spacer()
+                            }
+                            .frame(width: 320, height: 240)
+                            .background(Color.black)
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+
             // Navigation Items
             VStack(spacing: 6) {
                 ForEach(NavigationItem.allCases, id: \.self) { item in
@@ -104,6 +145,8 @@ struct SidebarView: View {
                     
                     Spacer()
                     
+                    // Removed advanced editor toggle for a cleaner UI
+
                     Button(action: {
                             if selectedSection == .notes {
                                 let newId = notesManager.addNote(title: "New Note", content: "")
@@ -346,6 +389,7 @@ struct MainContentView: View {
     let selectedSection: NavigationItem
     let notesManager: NotesManager
     let taskManager: TaskManager
+    @StateObject private var analytics = AnalyticsManager()
     
     var body: some View {
         switch selectedSection {
@@ -356,7 +400,115 @@ struct MainContentView: View {
         case .clipboard:
             // Show note editor for clipboard section
             NoteEditorView(notesManager: notesManager, section: .clipboard)
+        case .analytics:
+            AnalyticsView(taskManager: taskManager, analytics: analytics)
         }
+    }
+}
+
+struct AnalyticsView: View {
+    @ObservedObject var taskManager: TaskManager
+    @ObservedObject var analytics: AnalyticsManager
+    
+    private func completionForLast7Days() -> [(date: Date, percent: Double)] {
+        let cal = Calendar.current
+        var result: [(Date, Double)] = []
+        for offset in stride(from: 6, through: 0, by: -1) {
+            if let day = cal.date(byAdding: .day, value: -offset, to: Date()) {
+                let dayStart = cal.startOfDay(for: day)
+                if let list = taskManager.dailyTaskLists.first(where: { cal.isDate($0.date, inSameDayAs: dayStart) }) {
+                    result.append((dayStart, list.overallCompletionPercentage))
+                } else {
+                    result.append((dayStart, 0))
+                }
+            }
+        }
+        return result
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Analytics (7 days)")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.top, 20)
+                .padding(.horizontal, 20)
+            
+            // Separate charts with Y axes
+            HStack(alignment: .top, spacing: 24) {
+                // Completion chart
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Completion (%)")
+                        .foregroundColor(.gray)
+                    GeometryReader { geo in
+                        HStack(alignment: .bottom, spacing: 10) {
+                            // Y axis
+                            VStack(alignment: .trailing, spacing: 0) {
+                                ForEach([100, 75, 50, 25, 0], id: \.self) { tick in
+                                    Text("\(tick)")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.gray)
+                                        .frame(height: (geo.size.height - 16) / 4, alignment: .topTrailing)
+                                }
+                            }
+                            .frame(width: 26)
+                            // Bars
+                            ForEach(completionForLast7Days(), id: \.date) { item in
+                                VStack {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.blue)
+                                        .frame(width: 20, height: max(4, CGFloat(item.percent) / 100.0 * (geo.size.height - 20)))
+                                    Text(short(item.date))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 220)
+                }
+                // Screen time chart
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Screen Time (h)")
+                        .foregroundColor(.gray)
+                    GeometryReader { geo in
+                        HStack(alignment: .bottom, spacing: 10) {
+                            // Y axis (0..6h)
+                            VStack(alignment: .trailing, spacing: 0) {
+                                ForEach([6, 4, 2, 0], id: \.self) { tick in
+                                    Text("\(tick)")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.gray)
+                                        .frame(height: (geo.size.height - 12) / 3, alignment: .topTrailing)
+                                }
+                            }
+                            .frame(width: 20)
+                            ForEach(analytics.hoursLast7Days(), id: \.date) { item in
+                                VStack {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.orange)
+                                        .frame(width: 20, height: max(4, CGFloat(item.hours) / 6.0 * (geo.size.height - 20)))
+                                    Text(short(item.date))
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 220)
+                }
+            }
+            .padding(.horizontal, 20)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+    }
+    
+    private func short(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "E"
+        return f.string(from: date)
     }
 }
 
@@ -558,6 +710,114 @@ struct NoteEditorView: View {
         case .notes: return !note.isClipboardNote
         case .clipboard: return note.isClipboardNote
         case .toDoList: return false
+        case .analytics: return false
+        }
+    }
+}
+
+// MARK: - AI Chat Box
+struct AIChatBox: View {
+    let note: Note
+    @ObservedObject var notesManager: NotesManager
+    @State private var input: String = ""
+    @State private var isLoading = false
+    @Namespace private var bubbleNS
+    @State private var isTyping = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Messages
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(note.chat ?? []) { msg in
+                        HStack(alignment: .top) {
+                            if msg.role == .assistant { Spacer(minLength: 20) }
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(msg.content)
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 13))
+                                    .padding(10)
+                                    .background(msg.role == .user ? Color.blue.opacity(0.3) : Color.white.opacity(0.06))
+                                    .cornerRadius(10)
+                            }
+                            if msg.role == .user { Spacer(minLength: 20) }
+                        }
+                        .transition(.asymmetric(insertion: .move(edge: msg.role == .user ? .trailing : .leading).combined(with: .opacity), removal: .opacity))
+                    }
+                    if isTyping {
+                        HStack {
+                            Spacer(minLength: 20)
+                            TypingIndicator()
+                            Spacer()
+                        }
+                        .transition(.opacity)
+                    }
+                }
+                .padding(12)
+            }
+            .frame(maxHeight: 360)
+            .background(Color(red: 0.08, green: 0.08, blue: 0.10))
+            
+            Divider().background(Color.white.opacity(0.1))
+            
+            // Input row
+            HStack(spacing: 8) {
+                TextField("Ask AI about this note...", text: $input)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+                    .cornerRadius(8)
+                    .onSubmit { sendCompat() }
+                
+                Button(isLoading ? "..." : "Send") {
+                    sendCompat()
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(isLoading ? Color.gray : Color.blue)
+                .cornerRadius(8)
+                .foregroundColor(.white)
+                .disabled(isLoading || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(12)
+        }
+    }
+    
+    private func sendCompat() {
+        let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        input = ""
+        notesManager.appendChatMessage(noteId: note.id, role: .user, content: prompt)
+        isLoading = true
+        withAnimation(.easeInOut(duration: 0.2)) { isTyping = true }
+        notesManager.generateAIReply(noteId: note.id, prompt: prompt, noteContext: note.content) { reply in
+            notesManager.appendChatMessage(noteId: note.id, role: .assistant, content: reply)
+            isLoading = false
+            withAnimation(.easeInOut(duration: 0.2)) { isTyping = false }
+        }
+    }
+}
+
+private struct TypingIndicator: View {
+    @State private var phase: CGFloat = 0
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.white.opacity(0.6))
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(1 + 0.2 * sin(phase + CGFloat(i)))
+            }
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.06))
+        .cornerRadius(8)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                phase = .pi * 2
+            }
         }
     }
 }
@@ -566,12 +826,14 @@ enum NavigationItem: CaseIterable {
     case notes
     case toDoList
     case clipboard
+    case analytics
     
     var title: String {
         switch self {
         case .notes: return "Notes"
         case .toDoList: return "To-Do List"
         case .clipboard: return "Clipboard"
+        case .analytics: return "Analytics"
         }
     }
     
@@ -580,6 +842,7 @@ enum NavigationItem: CaseIterable {
         case .notes: return "note.text"
         case .toDoList: return "checklist"
         case .clipboard: return "clipboard"
+        case .analytics: return "chart.bar"
         }
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct SimpleTextEditor: View {
     let note: Note
@@ -67,12 +68,38 @@ struct SimpleTextEditor: View {
             .padding(.top, 30)
             .padding(.bottom, 20)
             
-            // Main Rich Text Editor with inline paste
+            // Main Text Editor (SwiftUI)
             VStack(spacing: 0) {
-                RichTextHost(note: note, initialText: note.content, notesManager: notesManager)
+                TextEditor(text: $text)
+                    .font(.system(size: 16, weight: .regular, design: .default))
+                    .foregroundColor(.white)
+                    .background(Color.clear)
+                    .scrollContentBackground(.hidden)
                     .padding(.horizontal, 30)
                     .id(note.id)
-                    .onChange(of: note.id) { _ in }
+                    .focused($isBodyFocused)
+                    .textSelection(.enabled)
+                    .onChange(of: text) { newValue in
+                        if !isProgrammaticChange {
+                            handleTextChange(newValue)
+                        }
+                    }
+                    // Capture Command+V to ensure image/file paste becomes attachment
+                    .onReceive(NotificationCenter.default.publisher(for: .pasteAttachment)) { _ in
+                        handlePasteFromClipboard()
+                    }
+                    .onAppear {
+                        isProgrammaticChange = true
+                        text = note.content
+                        detectLinks()
+                        DispatchQueue.main.async { isProgrammaticChange = false }
+                    }
+                    .onDisappear {
+                        notesManager.updateNoteContent(note, content: text)
+                    }
+                    .onDrop(of: [UTType.fileURL.identifier, UTType.tiff.identifier, UTType.png.identifier, UTType.jpeg.identifier, "public.heic", "com.adobe.pdf"], isTargeted: nil) { providers in
+                        handleDrop(providers: providers)
+                    }
                 Spacer()
             }
             
@@ -135,6 +162,9 @@ struct SimpleTextEditor: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
             notesManager.updateNoteContent(note, content: text)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pasteAttachment)) { _ in
+            handlePasteFromClipboard()
+        }
     }
     
     private func handleTextChange(_ newValue: String) {
@@ -189,6 +219,26 @@ struct SimpleTextEditor: View {
                         handled = true
                     }
                 }
+            } else if provider.hasItemConformingToTypeIdentifier("public.text") {
+                // Treat text drops that are file paths as attachments and suppress default insertion
+                group.enter()
+                provider.loadItem(forTypeIdentifier: "public.text", options: nil) { item, _ in
+                    defer { group.leave() }
+                    if let data = item as? Data, let str = String(data: data, encoding: .utf8) {
+                        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let url = URL(string: trimmed), url.isFileURL {
+                            self.importFile(url: url)
+                            handled = true
+                        } else if FileManager.default.fileExists(atPath: trimmed) {
+                            let url = URL(fileURLWithPath: trimmed)
+                            self.importFile(url: url)
+                            handled = true
+                        } else {
+                            // suppress plain text insertion for drops
+                            handled = true
+                        }
+                    }
+                }
             }
         }
         group.wait()
@@ -201,146 +251,46 @@ struct SimpleTextEditor: View {
             _ = notesManager.addAttachment(to: note.id, data: data, fileExtension: ext.isEmpty ? "dat" : ext, originalFilename: url.lastPathComponent)
         }
     }
-}
 
-// MARK: - RichTextHost: NSTextView with inline paste of images/PDFs
-private struct RichTextHost: NSViewRepresentable {
-    let note: Note
-    let initialText: String
-    @ObservedObject var notesManager: NotesManager
-    
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        let textView = PastingTextView()
-        textView.delegate = context.coordinator
-        textView.isRichText = true
-        textView.drawsBackground = false
-        textView.textColor = .white
-        textView.font = .systemFont(ofSize: 16)
-        textView.usesAdaptiveColorMappingForDarkAppearance = true
-        textView.textContainerInset = NSSize(width: 0, height: 0)
-        textView.backgroundColor = .clear
-        textView.string = initialText
-        textView.pasteDelegate = context.coordinator
-        
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        
-        scrollView.documentView = textView
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        return scrollView
-    }
-    
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        // Ensure the text view is the first responder so Cmd+V targets it
-        if let tv = nsView.documentView as? NSTextView {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(tv)
-            }
-        }
-    }
-    
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    
-    final class Coordinator: NSObject, NSTextViewDelegate, PastingTextViewDelegate {
-        let parent: RichTextHost
-        init(_ parent: RichTextHost) { self.parent = parent }
-        
-        func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            parent.notesManager.updateNoteContent(parent.note, content: tv.string)
-        }
-        
-        // Handle image/PDF paste inline and save attachment
-        func handlePastedImage(_ image: NSImage, in textView: NSTextView) {
-            guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { return }
-            _ = parent.notesManager.addAttachment(to: parent.note.id, data: png, fileExtension: "png", originalFilename: "pasted-image.png")
-            let att = NSTextAttachment()
-            att.image = image
-            let attr = NSAttributedString(attachment: att)
-            textView.textStorage?.insert(attr, at: textView.selectedRange().location)
-        }
-        
-        func handlePastedPDF(_ data: Data, in textView: NSTextView) {
-            _ = parent.notesManager.addAttachment(to: parent.note.id, data: data, fileExtension: "pdf", originalFilename: "pasted.pdf")
-            let placeholder = NSAttributedString(string: "[PDF attached]", attributes: [.foregroundColor: NSColor.systemBlue])
-            textView.textStorage?.insert(placeholder, at: textView.selectedRange().location)
-        }
-    }
-}
-
-// Custom NSTextView that intercepts paste
-private protocol PastingTextViewDelegate: AnyObject {
-    func handlePastedImage(_ image: NSImage, in textView: NSTextView)
-    func handlePastedPDF(_ data: Data, in textView: NSTextView)
-}
-
-private final class PastingTextView: NSTextView {
-    weak var pasteDelegate: PastingTextViewDelegate?
-    
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let pb = sender.draggingPasteboard
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [ .urlReadingFileURLsOnly: true ]) as? [URL], let url = urls.first {
-            let ext = url.pathExtension.lowercased()
-            if ["png","jpg","jpeg","gif","heic","tiff","bmp"].contains(ext), let image = NSImage(contentsOf: url) {
-                pasteDelegate?.handlePastedImage(image, in: self)
-                return true
-            }
-            if ext == "pdf", let pdfData = try? Data(contentsOf: url) {
-                pasteDelegate?.handlePastedPDF(pdfData, in: self)
-                return true
-            }
-        }
-        return super.performDragOperation(sender)
-    }
-
-    override func paste(_ sender: Any?) {
+    private func handlePasteFromClipboard() {
         let pb = NSPasteboard.general
-        if let types = pb.types {
-            // Prefer robust object-based reading first (works for Finder file copies)
-            if let urls = pb.readObjects(forClasses: [NSURL.self], options: [ .urlReadingFileURLsOnly: true ]) as? [URL], let url = urls.first {
-                let ext = url.pathExtension.lowercased()
-                if ["png","jpg","jpeg","gif","heic","tiff","bmp"].contains(ext), let image = NSImage(contentsOf: url) {
-                    pasteDelegate?.handlePastedImage(image, in: self)
-                    return
-                }
-                if ext == "pdf", let pdfData = try? Data(contentsOf: url) {
-                    pasteDelegate?.handlePastedPDF(pdfData, in: self)
-                    return
-                }
-            }
-            if types.contains(.tiff), let data = pb.data(forType: .tiff), let image = NSImage(data: data) {
-                pasteDelegate?.handlePastedImage(image, in: self)
+        // Prefer NSImage objects
+        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let image = images.first,
+           let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+            _ = notesManager.addAttachment(to: note.id, data: png, fileExtension: "png", originalFilename: "pasted-image.png")
+            return
+        }
+        if let data = pb.data(forType: .tiff), let image = NSImage(data: data),
+           let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+            _ = notesManager.addAttachment(to: note.id, data: png, fileExtension: "png", originalFilename: "pasted-image.png")
+            return
+        }
+        if let data = pb.data(forType: .png) {
+            _ = notesManager.addAttachment(to: note.id, data: data, fileExtension: "png", originalFilename: "pasted-image.png")
+            return
+        }
+        if let fileURLData = pb.data(forType: .fileURL),
+           let urlString = String(data: fileURLData, encoding: .utf8),
+           let url = URL(string: urlString) {
+            importFile(url: url)
+            return
+        }
+        // Sometimes pasteboard only has a plain string path
+        if let str = pb.string(forType: .string) ?? pb.string(forType: NSPasteboard.PasteboardType("public.utf8-plain-text")) {
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let url = URL(string: trimmed), url.isFileURL {
+                importFile(url: url)
                 return
             }
-            if types.contains(.png), let data = pb.data(forType: .png), let image = NSImage(data: data) {
-                pasteDelegate?.handlePastedImage(image, in: self)
-                return
-            }
-            if types.contains(.string), let path = pb.string(forType: .string), path.lowercased().hasSuffix(".png"), FileManager.default.fileExists(atPath: path), let image = NSImage(contentsOfFile: path) {
-                pasteDelegate?.handlePastedImage(image, in: self)
-                return
-            }
-            if types.contains(.fileURL), let data = pb.data(forType: .fileURL), let urlString = String(data: data, encoding: .utf8), let url = URL(string: urlString) {
-                let ext = url.pathExtension.lowercased()
-                if ["png","jpg","jpeg","gif","heic","tiff","bmp"].contains(ext), let image = NSImage(contentsOf: url) {
-                    pasteDelegate?.handlePastedImage(image, in: self)
-                    return
-                }
-                if ext == "pdf", let pdfData = try? Data(contentsOf: url) {
-                    pasteDelegate?.handlePastedPDF(pdfData, in: self)
-                    return
-                }
-            }
-            if let pdfData = pb.data(forType: .pdf) {
-                pasteDelegate?.handlePastedPDF(pdfData, in: self)
+            if FileManager.default.fileExists(atPath: trimmed) {
+                importFile(url: URL(fileURLWithPath: trimmed))
                 return
             }
         }
-        super.paste(sender)
     }
 }
+
+// Removed NS-based rich text host to revert to plain TextEditor
 
 private struct AttachmentRow: View {
     let att: Attachment
@@ -444,3 +394,4 @@ enum TextFormat {
     case italic
     case underline
 }
+
